@@ -14,7 +14,9 @@ export const FaultsView: React.FC<FaultsViewProps> = ({
 }) => {
   const [selectedServiceId, setSelectedServiceId] = useState<string>(services[0]?.id || 'payment-service');
   const [faultType, setFaultType] = useState<string>('cfs_quota');
-  const [duration, setDuration] = useState<number>(10);
+  const [intensity, setIntensity] = useState<number>(75);
+  const [duration, setDuration] = useState<number>(45);
+  const [rampPattern, setRampPattern] = useState<'linear' | 'exponential' | 'instant'>('exponential');
   const [isInjecting, setIsInjecting] = useState<boolean>(false);
   const [lastInjected, setLastInjected] = useState<{
     serviceName: string;
@@ -26,14 +28,14 @@ export const FaultsView: React.FC<FaultsViewProps> = ({
   const faultTypes = [
     {
       id: 'cfs_quota',
-      name: 'CFS Quota Exhaustion',
-      desc: 'Saturates cgroup CPU quota past 85% to trigger kernel throttling and latency spikes.',
+      name: 'cgroup CFS Throttle Contention',
+      desc: 'Saturates cgroup CPU quota past 85% to trigger kernel throttling and thread latency spikes.',
       impact: 'Triggers eBPF proactive throttle clamp within 320ms.',
       icon: 'speed',
     },
     {
       id: 'memory_leak',
-      name: 'Simulated Heap Memory Spike',
+      name: 'Unchecked Anonymous Heap Surge',
       desc: 'Rapidly allocates unmapped anonymous pages to push memory limit close to OOM killer boundary.',
       impact: 'Sentinel triggers kprobe:cgroup_rstat memory drain and slab reclaim.',
       icon: 'memory',
@@ -47,8 +49,8 @@ export const FaultsView: React.FC<FaultsViewProps> = ({
     },
     {
       id: 'zombie_threads',
-      name: 'Zombie PID Saturation',
-      desc: 'Spawns 50 orphan worker processes without waiting for SIGCHLD harvest.',
+      name: 'Zombie PID Saturation (Subtree Leak)',
+      desc: 'Spawns orphan worker processes without waiting for SIGCHLD harvest.',
       impact: 'Sentinel in-kernel reap cleans subtree in sub-second window.',
       icon: 'group_work',
     },
@@ -66,10 +68,10 @@ export const FaultsView: React.FC<FaultsViewProps> = ({
       setLastInjected({
         serviceName: s?.name || selectedServiceId,
         faultName: fault?.name || faultType,
-        result: 'Sentinel eBPF Agent successfully detected anomaly and stabilized target.',
+        result: `Sentinel eBPF Agent detected anomaly at ${intensity}% stress (${rampPattern} ramp). Auto-stabilized target in 2.8s MTTR.`,
         timestamp: new Date().toLocaleTimeString(),
       });
-    }, duration * 1000 > 3000 ? 3000 : duration * 1000);
+    }, 2800);
   };
 
   const selectedService = services.find((s) => s.id === selectedServiceId) || services[0];
@@ -96,34 +98,12 @@ export const FaultsView: React.FC<FaultsViewProps> = ({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left: Configuration Form */}
+        {/* Left Column: Configuration Form */}
         <div className="lg:col-span-7 bg-[#1d2024] rounded-lg p-5 border border-[#272a2e] space-y-5">
-          <h3 className="font-semibold text-[14px] text-[#e1e2e8] uppercase tracking-wider pb-2 border-b border-[#272a2e]">
-            1. Configure Fault Vector
-          </h3>
-
-          {/* Target Service Selection */}
-          <div className="space-y-1.5">
-            <label className="text-[12px] font-medium text-[#c3c7cd] uppercase tracking-wider">
-              Target Microservice
-            </label>
-            <select
-              value={selectedServiceId}
-              onChange={(e) => setSelectedServiceId(e.target.value)}
-              className="w-full bg-[#0b0e12] text-[#e1e2e8] font-mono text-[13px] p-2.5 rounded-lg border border-[#272a2e] focus:outline-none focus:border-[#7a93ac]"
-            >
-              {services.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name} (PID {s.pid}) — {s.category} · {s.health}% Health
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Fault Type Selection */}
+          {/* 1. Fault Scenario Selection */}
           <div className="space-y-2">
-            <label className="text-[12px] font-medium text-[#c3c7cd] uppercase tracking-wider">
-              Fault Injection Scenario
+            <label className="text-[11px] font-semibold text-[#8d9197] uppercase tracking-wider block">
+              1. Disruption Scenario Vector
             </label>
             <div className="space-y-2">
               {faultTypes.map((f) => {
@@ -145,15 +125,12 @@ export const FaultsView: React.FC<FaultsViewProps> = ({
                       <div className="flex items-center justify-between">
                         <span className="font-semibold text-[13px] text-[#e1e2e8]">{f.name}</span>
                         {isSelected && (
-                          <span className="text-[10px] font-mono text-[#b0c9e4] bg-[#7a93ac]/20 px-2 py-0.5 rounded">
+                          <span className="text-[10px] font-mono text-[#b0c9e4] bg-[#7a93ac]/20 px-2 py-0.5 rounded font-medium">
                             SELECTED
                           </span>
                         )}
                       </div>
                       <p className="text-[11px] text-[#8d9197] mt-0.5">{f.desc}</p>
-                      <div className="mt-1 text-[11px] font-mono text-[#aacfb6]">
-                        ↳ Mitigation: {f.impact}
-                      </div>
                     </div>
                   </div>
                 );
@@ -161,37 +138,133 @@ export const FaultsView: React.FC<FaultsViewProps> = ({
             </div>
           </div>
 
-          {/* Duration Slider */}
-          <div className="space-y-1.5 pt-2">
-            <div className="flex items-center justify-between">
-              <label className="text-[12px] font-medium text-[#c3c7cd] uppercase tracking-wider">
-                Fault Duration
-              </label>
-              <span className="font-mono text-[13px] text-[#b0c9e4] font-semibold bg-[#0b0e12] px-2 py-0.5 rounded border border-[#272a2e]">
-                {duration} Seconds
-              </span>
+          {/* 2. Target Microservice Selection */}
+          <div className="space-y-2">
+            <label className="text-[11px] font-semibold text-[#8d9197] uppercase tracking-wider block">
+              2. Target Service Payload
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+              {services.map((s) => {
+                const isTarget = selectedServiceId === s.id;
+                return (
+                  <div
+                    key={s.id}
+                    onClick={() => setSelectedServiceId(s.id)}
+                    className={`p-2.5 rounded-lg border cursor-pointer transition-colors flex items-center justify-between ${
+                      isTarget
+                        ? 'bg-[#0b0e12] border-[#7a93ac] text-[#b0c9e4]'
+                        : 'bg-[#191c20] border-[#272a2e] text-[#c3c7cd] hover:border-[#43474c]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#aacfb6] shrink-0"></span>
+                      <div className="truncate">
+                        <div className="text-[12px] font-medium truncate text-[#e1e2e8]">{s.name}</div>
+                        <div className="text-[10px] font-mono text-[#8d9197] truncate">{s.cgroupPath}</div>
+                      </div>
+                    </div>
+                    <input
+                      type="radio"
+                      checked={isTarget}
+                      onChange={() => setSelectedServiceId(s.id)}
+                      className="accent-[#7a93ac] cursor-pointer"
+                    />
+                  </div>
+                );
+              })}
             </div>
-            <input
-              type="range"
-              min="5"
-              max="60"
-              step="5"
-              value={duration}
-              onChange={(e) => setDuration(Number(e.target.value))}
-              className="w-full h-1.5 bg-[#0b0e12] rounded-lg appearance-none cursor-pointer accent-[#b0c9e4]"
-            />
           </div>
 
-          {/* Execute Button */}
+          {/* 3. Dynamic Tuning Sliders matching scyld-ai-five */}
+          <div className="space-y-4 pt-2 border-t border-[#272a2e]">
+            <label className="text-[11px] font-semibold text-[#8d9197] uppercase tracking-wider block">
+              3. Stress Telemetry Envelopes
+            </label>
+
+            {/* Intensity */}
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center text-[12px]">
+                <span className="text-[#e1e2e8]">Target Stress Load Intensity</span>
+                <span className="font-mono text-[13px] text-[#b0c9e4] font-semibold">
+                  {intensity}% ({(intensity * 0.04).toFixed(1)} GB Allocation)
+                </span>
+              </div>
+              <input
+                type="range"
+                min="10"
+                max="100"
+                value={intensity}
+                onChange={(e) => setIntensity(Number(e.target.value))}
+                className="w-full h-1.5 bg-[#0b0e12] rounded appearance-none cursor-pointer accent-[#b0c9e4]"
+              />
+              <div className="flex justify-between font-mono text-[10px] text-[#8d9197]">
+                <span>10% (Canary baseline)</span>
+                <span>50% (Standard spike)</span>
+                <span>100% (Kernel limit)</span>
+              </div>
+            </div>
+
+            {/* Duration */}
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center text-[12px]">
+                <span className="text-[#e1e2e8]">Disruption Exposure Duration</span>
+                <span className="font-mono text-[13px] text-[#b0c9e4] font-semibold">
+                  {duration}s Window
+                </span>
+              </div>
+              <input
+                type="range"
+                min="10"
+                max="300"
+                step="5"
+                value={duration}
+                onChange={(e) => setDuration(Number(e.target.value))}
+                className="w-full h-1.5 bg-[#0b0e12] rounded appearance-none cursor-pointer accent-[#b0c9e4]"
+              />
+              <div className="flex justify-between font-mono text-[10px] text-[#8d9197]">
+                <span>10s</span>
+                <span>60s</span>
+                <span>180s</span>
+                <span>300s Max</span>
+              </div>
+            </div>
+
+            {/* Ramp-up Velocity Curve matching scyld-ai-five */}
+            <div className="space-y-1.5">
+              <span className="text-[12px] text-[#e1e2e8] block">Ramp-up Velocity Curve</span>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: 'linear', label: 'Linear' },
+                  { id: 'exponential', label: 'Exponential' },
+                  { id: 'instant', label: 'Instantaneous' },
+                ].map((curve) => (
+                  <button
+                    key={curve.id}
+                    type="button"
+                    onClick={() => setRampPattern(curve.id as any)}
+                    className={`py-2 px-3 rounded-lg text-[12px] font-medium transition-colors ${
+                      rampPattern === curve.id
+                        ? 'bg-[#323539] text-[#b0c9e4] border border-[#7a93ac]'
+                        : 'bg-[#0b0e12] text-[#8d9197] border border-[#272a2e] hover:text-[#e1e2e8]'
+                    }`}
+                  >
+                    {curve.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* 4. Execution CTA */}
           <button
             onClick={handleInject}
             disabled={isInjecting}
-            className="w-full py-3 rounded-lg bg-[#d4a373] hover:bg-[#C9A66B] text-[#191c20] font-semibold text-[14px] flex items-center justify-center gap-2 transition-all shadow-md disabled:opacity-50 cursor-pointer"
+            className="w-full py-3 rounded-lg bg-[#d4a373] hover:bg-[#C9A66B] text-[#191c20] font-bold text-[14px] flex items-center justify-center gap-2 transition-all shadow-md disabled:opacity-50 cursor-pointer"
           >
             {isInjecting ? (
               <>
                 <span className="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>
-                <span>Injecting Fault & Observing eBPF Telemetry ({duration}s)...</span>
+                <span>Executing Chaos Injection & Observing eBPF Telemetry ({duration}s)...</span>
               </>
             ) : (
               <>
@@ -202,11 +275,11 @@ export const FaultsView: React.FC<FaultsViewProps> = ({
           </button>
         </div>
 
-        {/* Right: Live Observer Preview */}
+        {/* Right Column: Target Snapshot & Live Observation */}
         <div className="lg:col-span-5 space-y-4">
           <div className="bg-[#1d2024] rounded-lg p-5 border border-[#272a2e] space-y-4">
             <h3 className="font-semibold text-[14px] text-[#e1e2e8] uppercase tracking-wider pb-2 border-b border-[#272a2e]">
-              2. Target Service Snapshot
+              Target Service Snapshot
             </h3>
 
             {selectedService && (
@@ -247,12 +320,11 @@ export const FaultsView: React.FC<FaultsViewProps> = ({
             )}
           </div>
 
-          {/* Last Injected Status Result */}
           {lastInjected && (
             <div className="bg-[#1d2024] rounded-lg p-5 border border-[#aacfb6]/40 space-y-2 animate-in fade-in">
               <div className="flex items-center gap-2 text-[#aacfb6] font-semibold text-[13px]">
                 <span className="material-symbols-outlined text-[18px]">verified</span>
-                <span>Fault Injection & Auto-Healing Report</span>
+                <span>Autonomous Self-Healing Verification</span>
               </div>
               <p className="text-[12px] text-[#e1e2e8]">
                 Target: <span className="font-mono text-[#b0c9e4]">{lastInjected.serviceName}</span> · Fault: <span className="text-[#C9A66B]">{lastInjected.faultName}</span>

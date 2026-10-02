@@ -5,15 +5,19 @@ interface IncidentsViewProps {
   incidents: IncidentGate[];
   onUpdateIncidentStatus: (id: string, status: IncidentGate['status']) => void;
   onNavigateToFleet: (serviceId: string) => void;
+  onTriggerGatedIncident?: () => void;
 }
 
 export const IncidentsView: React.FC<IncidentsViewProps> = ({
   incidents,
   onUpdateIncidentStatus,
   onNavigateToFleet,
+  onTriggerGatedIncident,
 }) => {
   const [filterSeverity, setFilterSeverity] = useState<string>('ALL');
   const [selectedIncident, setSelectedIncident] = useState<IncidentGate | null>(null);
+
+  const pendingGates = incidents.filter((inc) => inc.status === 'PENDING_GATE');
 
   const filtered = incidents.filter((inc) => {
     if (filterSeverity !== 'ALL' && inc.severity !== filterSeverity) return false;
@@ -26,15 +30,18 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
       <div className="bg-[#1d2024] p-5 rounded-lg border border-[#272a2e] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-[#C9A66B] text-[22px]">
+              verified_user
+            </span>
             <h2 className="text-[18px] font-semibold text-[#e1e2e8]">
-              Sentinel Incidents & Policy Gates
+              Human Approval Gates & Incident Ledger
             </h2>
             <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-[#323539] text-[#b0c9e4]">
-              {incidents.length} Records
+              {incidents.length} Total
             </span>
           </div>
           <p className="text-[12px] text-[#8d9197] mt-1">
-            Real-time eBPF mitigation decisions, approval gates, and autonomous rollback triggers.
+            This is where human operators grant permission for in-kernel remediations, pod drains, and quota adjustments.
           </p>
         </div>
 
@@ -56,8 +63,96 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
         </div>
       </div>
 
-      {/* Incident List Cards */}
+      {/* PROMINENT HUMAN APPROVAL SECTION (Answers "where will I give human approval") */}
+      <div className="bg-[#191c20] rounded-xl border-2 border-[#C9A66B]/60 p-5 shadow-lg space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-[#272a2e]">
+          <div className="flex items-center gap-2.5">
+            <span className="w-3 h-3 rounded-full bg-[#C9A66B] animate-ping"></span>
+            <span className="text-[15px] font-semibold text-[#e1e2e8]">
+              {pendingGates.length > 0
+                ? `🚨 ${pendingGates.length} Action(s) Awaiting Your Human Approval`
+                : '✅ Human Approval Queue: All Gates Clear'}
+            </span>
+          </div>
+          {onTriggerGatedIncident && (
+            <button
+              onClick={onTriggerGatedIncident}
+              className="px-3 py-1.5 rounded-lg bg-[#272a2e] hover:bg-[#323539] text-[#C9A66B] hover:text-white text-[12px] font-mono border border-[#C9A66B]/40 transition-colors flex items-center gap-1.5"
+            >
+              <span className="material-symbols-outlined text-[15px]">bolt</span>
+              <span>Create Test Gated Incident</span>
+            </button>
+          )}
+        </div>
+
+        {pendingGates.length === 0 ? (
+          <div className="p-4 bg-[#0b0e12] rounded-lg text-center text-[#8d9197] text-[13px] space-y-1">
+            <p className="text-[#aacfb6] font-medium">No actions currently require manual sign-off.</p>
+            <p className="text-[12px]">
+              When running in <strong>GATED mode</strong>, any anomaly or traffic spike will pause here until you click <strong>Approve</strong>.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {pendingGates.map((gate) => (
+              <div
+                key={gate.id}
+                className="p-4 bg-[#0b0e12] rounded-lg border border-[#C9A66B]/50 flex flex-col md:flex-row md:items-center justify-between gap-4"
+              >
+                <div className="space-y-1.5 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[#C9A66B]/20 text-[#C9A66B] border border-[#C9A66B]/40">
+                      APPROVAL REQUIRED
+                    </span>
+                    <span className="font-mono text-[11px] text-[#8d9197]">{gate.id}</span>
+                    <span className="text-[#8d9197]">·</span>
+                    <button
+                      onClick={() => onNavigateToFleet(gate.serviceId)}
+                      className="font-mono text-[13px] text-[#b0c9e4] hover:underline font-semibold"
+                    >
+                      {gate.serviceName}
+                    </button>
+                    <span className="text-[#8d9197]">·</span>
+                    <span className="text-[11px] font-mono text-[#8d9197]">{gate.detectedAt}</span>
+                  </div>
+
+                  <h4 className="text-[14px] font-semibold text-[#e1e2e8]">{gate.title}</h4>
+                  <p className="text-[12px] text-[#8d9197]">{gate.description}</p>
+
+                  <div className="pt-1 text-[12px] font-mono text-[#aacfb6] flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[16px]">psychology</span>
+                    <span><strong>Proposed eBPF Fix:</strong> {gate.ebpfProposedFix || gate.ebpfActionTaken}</span>
+                  </div>
+                </div>
+
+                {/* Big, Clear Action Buttons */}
+                <div className="flex items-center gap-2.5 shrink-0 pt-2 md:pt-0">
+                  <button
+                    onClick={() => onUpdateIncidentStatus(gate.id, 'APPROVED')}
+                    className="px-4 py-2.5 rounded-lg bg-[#aacfb6] hover:bg-[#c5ecd1] text-[#153725] font-bold text-[13px] flex items-center gap-1.5 shadow-md cursor-pointer transition-all hover:scale-105"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">check_circle</span>
+                    <span>✅ Approve & Execute eBPF Fix</span>
+                  </button>
+                  <button
+                    onClick={() => onUpdateIncidentStatus(gate.id, 'REJECTED')}
+                    className="px-3.5 py-2.5 rounded-lg bg-[#272a2e] hover:bg-[#ffb4ab]/20 text-[#ffb4ab] border border-[#ffb4ab]/30 font-medium text-[13px] transition-colors cursor-pointer"
+                  >
+                    <span>❌ Reject</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Historical Incident List Cards */}
       <div className="space-y-3">
+        <h3 className="text-[14px] font-semibold text-[#8d9197] uppercase tracking-wider">
+          Incident History & Auto-Mitigation Audit
+        </h3>
+
         {filtered.map((inc) => {
           let badgeStyle = 'bg-[#b0c9e4]/20 text-[#b0c9e4]';
           if (inc.severity === 'CRITICAL') badgeStyle = 'bg-[#ffb4ab]/20 text-[#ffb4ab] border border-[#ffb4ab]/30';
@@ -94,7 +189,7 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
                 </div>
               </div>
 
-              {/* Status & Gates Action */}
+              {/* Status & Details */}
               <div className="flex items-center gap-3 shrink-0">
                 <div className="text-right">
                   <div className="text-[10px] uppercase font-mono text-[#8d9197]">Gate Status</div>
@@ -113,31 +208,12 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
                   </span>
                 </div>
 
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => setSelectedIncident(inc)}
-                    className="px-3 py-1.5 rounded-lg bg-[#272a2e] hover:bg-[#323539] text-[#e1e2e8] text-[12px] font-medium transition-colors border border-[#43474c]"
-                  >
-                    Details
-                  </button>
-
-                  {inc.status === 'PENDING_GATE' && (
-                    <>
-                      <button
-                        onClick={() => onUpdateIncidentStatus(inc.id, 'APPROVED')}
-                        className="px-3 py-1.5 rounded-lg bg-[#7a93ac] text-[#112c41] hover:bg-[#b0c9e4] text-[12px] font-semibold transition-colors"
-                      >
-                        Approve
-                      </button>
-                      <button
-                        onClick={() => onUpdateIncidentStatus(inc.id, 'REJECTED')}
-                        className="px-3 py-1.5 rounded-lg bg-[#272a2e] text-[#ffb4ab] hover:bg-[#ffb4ab]/20 text-[12px] font-semibold transition-colors"
-                      >
-                        Reject
-                      </button>
-                    </>
-                  )}
-                </div>
+                <button
+                  onClick={() => setSelectedIncident(inc)}
+                  className="px-3 py-1.5 rounded-lg bg-[#272a2e] hover:bg-[#323539] text-[#e1e2e8] text-[12px] font-medium transition-colors border border-[#43474c]"
+                >
+                  Details
+                </button>
               </div>
             </div>
           );
@@ -178,7 +254,7 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
                 </p>
               </div>
               <div>
-                <span className="text-[#8d9197] block uppercase text-[10px]">Permanent Architecture Fix</span>
+                <span className="text-[#8d9197] block uppercase text-[10px]">Permanent In-Kernel Remediation</span>
                 <p className="text-[#b0c9e4] bg-[#0b0e12] p-2.5 rounded border border-[#272a2e] mt-1">
                   {selectedIncident.ebpfProposedFix}
                 </p>

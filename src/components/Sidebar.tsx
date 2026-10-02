@@ -3,7 +3,6 @@ import React from 'react';
 export type RouteKey =
   | 'fleet'
   | 'nodes'
-  | 'architecture'
   | 'control-room'
   | 'incidents'
   | 'faults'
@@ -19,6 +18,7 @@ interface SidebarProps {
   mobileOpen: boolean;
   onCloseMobile: () => void;
   onOpenDeployModal: () => void;
+  pendingApprovalsCount?: number;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -27,6 +27,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   mobileOpen,
   onCloseMobile,
   onOpenDeployModal,
+  pendingApprovalsCount = 1,
 }) => {
   const navSections = [
     {
@@ -45,20 +46,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
           badge: '42',
         },
         {
-          key: 'architecture' as RouteKey,
-          label: 'Architecture & eBPF',
-          icon: 'hub',
-        },
-        {
           key: 'control-room' as RouteKey,
           label: 'Control Room',
           icon: 'monitoring',
         },
         {
           key: 'incidents' as RouteKey,
-          label: 'Incidents & Gates',
-          icon: 'drive_file_rename_outline',
-          badge: '2',
+          label: 'Incidents & Approval Gates',
+          icon: 'verified_user',
+          badge: pendingApprovalsCount > 0 ? `${pendingApprovalsCount} Gate` : '0',
+          badgeColor: pendingApprovalsCount > 0 ? 'bg-[#C9A66B]/20 text-[#C9A66B] border-[#C9A66B]/40' : undefined,
         },
       ],
     },
@@ -221,7 +218,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           <span className="truncate">{item.label}</span>
                         </div>
                         {item.badge && (
-                          <span className="text-[10px] font-mono font-medium px-1.5 py-0.2 bg-[#0b0e12] border border-[#272a2e] rounded text-[#8d9197]">
+                          <span
+                            className={`text-[10px] font-mono font-medium px-1.5 py-0.2 border rounded ${
+                              (item as any).badgeColor || 'bg-[#0b0e12] border-[#272a2e] text-[#8d9197]'
+                            }`}
+                          >
                             {item.badge}
                           </span>
                         )}

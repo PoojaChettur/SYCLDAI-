@@ -18,6 +18,9 @@ export interface Microservice {
   status: ServiceStatus;
   statusText: string;
   actionText: string;
+  badgeText?: string;
+  badgeColor?: string;
+  iconName?: string;
   cgroupPath: string;
   rssMb: number;
   anonMb: number;
@@ -49,6 +52,9 @@ export interface KernelTelemetryLog {
 export interface ClusterRegion {
   id: string;
   name: string;
+  companyName?: string;
+  provider?: 'aws' | 'gcp' | 'azure' | 'k8s' | 'sandbox';
+  isSandbox?: boolean;
   location: string;
   kernelVersion: string;
   activeNodes: number;
@@ -94,4 +100,18 @@ export interface AuditRecord {
   result: 'SUCCESS' | 'MITIGATED' | 'BLOCKED';
   signatureHash: string;
   details: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  sender: 'user' | 'assistant' | 'system';
+  text: string;
+  timestamp: string;
+  nodeDetail?: NodeAgentInfo;
+  pendingGate?: IncidentGate;
+  quickActions?: {
+    label: string;
+    action: string;
+    type?: 'approve' | 'reject' | 'navigate' | 'probe' | 'primary';
+  }[];
 }

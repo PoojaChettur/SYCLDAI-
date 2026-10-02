@@ -3,7 +3,6 @@ import { Header } from './components/Header';
 import { Sidebar, RouteKey } from './components/Sidebar';
 import { FleetRadarView } from './views/FleetRadarView';
 import { NodesView } from './views/NodesView';
-import { ArchitectureView } from './views/ArchitectureView';
 import { ControlRoomView } from './views/ControlRoomView';
 import { IncidentsView } from './views/IncidentsView';
 import { FaultsView } from './views/FaultsView';
@@ -18,6 +17,10 @@ import { ExpandTelemetryModal } from './components/ExpandTelemetryModal';
 import { ClusterRegionModal } from './components/ClusterRegionModal';
 import { UserProfileModal } from './components/UserProfileModal';
 import { InstallDaemonSetModal } from './components/InstallDaemonSetModal';
+import { CloudConnectModal } from './components/CloudConnectModal';
+import { InteractiveDemoTour } from './components/InteractiveDemoTour';
+import { AiChatbot } from './components/AiChatbot';
+import { HumanApprovalModal } from './components/HumanApprovalModal';
 import { ToastContainer, ToastMessage } from './components/Toast';
 import {
   INITIAL_SERVICES,
@@ -26,6 +29,7 @@ import {
   INITIAL_INCIDENTS,
   INITIAL_AUDIT_LOGS,
 } from './data/mockData';
+import { COMPANY_PRESETS } from './data/companyPresets';
 import {
   Microservice,
   SentinelMode,
@@ -41,14 +45,35 @@ export default function App() {
   const [currentRoute, setCurrentRoute] = useState<RouteKey>('fleet');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
+  // Active Company Cloud & Sandbox State
+  const [activeCompanyName, setActiveCompanyName] = useState<string>('Acme Global Financial Corp');
+  const [isSandboxActive, setIsSandboxActive] = useState<boolean>(true);
+
   // Core Data States
-  const [services, setServices] = useState<Microservice[]>(INITIAL_SERVICES);
-  const [selectedServiceId, setSelectedServiceId] = useState<string>('payment-service');
+  const [services, setServices] = useState<Microservice[]>(COMPANY_PRESETS[1].services);
+  const [selectedServiceId, setSelectedServiceId] = useState<string>(COMPANY_PRESETS[1].services[0].id);
   const [logs, setLogs] = useState<KernelTelemetryLog[]>(INITIAL_LOGS);
-  const [mode, setMode] = useState<SentinelMode>('armed');
+  const [mode, setMode] = useState<SentinelMode>('gated'); // Default to Gated so human approval is immediately ready to try!
   const [hosting, setHosting] = useState<ControlPlaneHosting>('customer-vpc');
-  const [currentCluster, setCurrentCluster] = useState<ClusterRegion>(CLUSTER_REGIONS[0]);
-  const [incidents, setIncidents] = useState<IncidentGate[]>(INITIAL_INCIDENTS);
+  const [currentCluster, setCurrentCluster] = useState<ClusterRegion>(COMPANY_PRESETS[1].cluster);
+
+  // Initial pending incident gate for immediate human-approval testing
+  const [incidents, setIncidents] = useState<IncidentGate[]>([
+    {
+      id: 'GATE-2026-0982',
+      serviceId: COMPANY_PRESETS[1].services[0].id,
+      serviceName: COMPANY_PRESETS[1].services[0].name,
+      title: 'cgroup CFS quota burst mitigation pending approval',
+      description: 'Transaction volume surge pushed cgroup CPU allocation past 75% threshold.',
+      severity: 'HIGH',
+      status: 'PENDING_GATE',
+      detectedAt: 'Just now',
+      rootCause: 'Batch transaction serialization peak in node worker thread #4',
+      ebpfActionTaken: 'Sentinel throttler prepared sub-second memory drain and quota pacing.',
+      ebpfProposedFix: 'Clamp CFS slice allocations to 22% and free 42MB inactive cache without container restart.',
+    },
+    ...INITIAL_INCIDENTS,
+  ]);
   const [auditLogs, setAuditLogs] = useState<AuditRecord[]>(INITIAL_AUDIT_LOGS);
 
   // Modals & Panels
@@ -58,6 +83,11 @@ export default function App() {
   const [isClusterModalOpen, setIsClusterModalOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isDeployModalOpen, setIsDeployModalOpen] = useState(false);
+  const [isCloudConnectOpen, setIsCloudConnectOpen] = useState(false);
+  const [isDemoTourOpen, setIsDemoTourOpen] = useState(false);
+  const [isAiChatOpen, setIsAiChatOpen] = useState(false);
+  const [isApprovalModalOpen, setIsApprovalModalOpen] = useState(false);
+  const [demoTourStep, setDemoTourStep] = useState(1);
   const [targetTweakService, setTargetTweakService] = useState<Microservice | null>(null);
 
   // Probing and Toast notifications
@@ -67,6 +97,9 @@ export default function App() {
   // Selected microservice object
   const selectedService =
     services.find((s) => s.id === selectedServiceId) || services[0];
+
+  // Pending Human Approval Gates
+  const pendingGates = incidents.filter((inc) => inc.status === 'PENDING_GATE');
 
   // Helper to add toast
   const addToast = useCallback(
@@ -101,11 +134,9 @@ export default function App() {
       setCurrentRoute('fleet');
     } else if (clean === 'nodes' || clean === 'daemonset' || clean === 'servers') {
       setCurrentRoute('nodes');
-    } else if (clean === 'architecture' || clean === 'ebpf-flow' || clean === 'pipeline') {
-      setCurrentRoute('architecture');
     } else if (clean === 'control-room' || clean === 'control') {
       setCurrentRoute('control-room');
-    } else if (clean === 'incidents' || clean === 'incidents-gates') {
+    } else if (clean === 'incidents' || clean === 'incidents-gates' || clean === 'gates') {
       setCurrentRoute('incidents');
     } else if (clean === 'faults' || clean === 'inject-faults' || clean === 'fault-injection') {
       setCurrentRoute('faults');
@@ -124,7 +155,6 @@ export default function App() {
     }
   }, []);
 
-  // Listen for hashchange
   useEffect(() => {
     applyRouteFromHash();
     window.addEventListener('hashchange', applyRouteFromHash);
@@ -152,7 +182,7 @@ export default function App() {
       addToast(
         'warning',
         'Human-Approval GATED Mode Active',
-        'Agent will detect anomalies and queue proposed remediations in Incidents & Gates for operator approval.'
+        'Remediations will pause and require your approval in Incidents & Approval Gates.'
       );
     } else {
       addToast(
@@ -162,14 +192,13 @@ export default function App() {
       );
     }
 
-    // Log to audit
     setAuditLogs((prev) => [
       {
         id: `AUD-${Math.floor(1000 + Math.random() * 9000)}`,
         timestamp: `${new Date().toISOString().replace('T', ' ').substring(0, 19)} UTC`,
         operator: 'sit24sc025@sairamtap.edu.in',
         action: `Execution Mode Shifted to ${newMode.toUpperCase()}`,
-        targetService: 'Cluster Nodes (42)',
+        targetService: `${activeCompanyName} Nodes (${currentCluster.activeNodes})`,
         pid: 0,
         result: 'SUCCESS',
         signatureHash: Array.from({ length: 64 }, () =>
@@ -204,7 +233,7 @@ export default function App() {
         {
           probe: '[kprobe:cgroup_rstat]',
           type: 'kprobe' as const,
-          msg: `cgroup v2 CPU CFS slice verified: 0 periods throttled across 42 DaemonSet nodes`,
+          msg: `cgroup v2 CPU CFS slice verified: 0 periods throttled across ${currentCluster.activeNodes} nodes`,
         },
         {
           probe: '[tc:cls_bpf]',
@@ -219,7 +248,7 @@ export default function App() {
         {
           probe: '[bpf_prog_sentinel]',
           type: 'bpf' as const,
-          msg: `DaemonSet keepalive heartbeat acked from node-${Math.floor(Math.random() * 42 + 1)}`,
+          msg: `DaemonSet keepalive heartbeat acked from ${currentCluster.name}-worker-${Math.floor(Math.random() * 42 + 1)}`,
         },
       ];
 
@@ -239,7 +268,7 @@ export default function App() {
     }, 8500);
 
     return () => clearInterval(interval);
-  }, [services]);
+  }, [services, currentCluster]);
 
   // Handle Force Health Probe action
   const handleTriggerProbe = (serviceId: string) => {
@@ -259,7 +288,7 @@ export default function App() {
           probe: '[kprobe:sys_enter]',
           probeType: 'kprobe',
           serviceId: target.id,
-          message: `Synthetic probe completed: Latency ${latency}ms · 0 drops across 42 DaemonSet agents`,
+          message: `Synthetic probe completed: Latency ${latency}ms · 0 drops across ${currentCluster.activeNodes} DaemonSet agents`,
         },
       ]);
 
@@ -275,7 +304,7 @@ export default function App() {
           signatureHash: Array.from({ length: 64 }, () =>
             Math.floor(Math.random() * 16).toString(16)
           ).join(''),
-          details: `Manual in-kernel health probe execution confirmed. RTT latency: ${latency}ms.`,
+          details: `Manual in-kernel health probe confirmed on ${activeCompanyName}. Latency: ${latency}ms.`,
         },
         ...prev,
       ]);
@@ -283,7 +312,7 @@ export default function App() {
       addToast(
         'success',
         `Health Probe Verified: ${target.name}`,
-        `In-kernel response: ${latency}ms. All 42 DaemonSet nodes active and verified.`
+        `In-kernel response: ${latency}ms. All ${currentCluster.activeNodes} DaemonSet nodes active and verified.`
       );
     }, 600);
   };
@@ -321,7 +350,7 @@ export default function App() {
   };
 
   // Handle Simulating Anomaly / Chaos Injection
-  const handleSimulateAnomaly = (serviceId: string) => {
+  const handleSimulateAnomaly = (serviceId?: string) => {
     const target = services.find((s) => s.id === serviceId) || selectedService;
 
     setServices((prev) =>
@@ -357,48 +386,160 @@ export default function App() {
       },
     ]);
 
-    setTimeout(() => {
+    // If in GATED mode, create a pending approval gate!
+    if (mode === 'gated') {
+      const newGate: IncidentGate = {
+        id: `GATE-${Date.now().toString().slice(-4)}`,
+        serviceId: target.id,
+        serviceName: target.name,
+        title: `CFS Quota Spike on ${target.name}`,
+        description: `Sudden heap expansion under surge traffic exceeded threshold (68%).`,
+        severity: 'HIGH',
+        status: 'PENDING_GATE',
+        detectedAt: 'Just now',
+        rootCause: 'Worker thread memory allocation burst',
+        ebpfActionTaken: 'Sentinel eBPF throttler prepared memory drain and quota pacing.',
+        ebpfProposedFix: `Clamp CFS quota to 20% and drain 38MB inactive memory on ${target.name}.`,
+      };
+      setIncidents((prev) => [newGate, ...prev]);
+      addToast(
+        'warning',
+        'Human Approval Required!',
+        `Incident gate created for ${target.name}. Please approve to execute eBPF fix.`
+      );
+    } else {
+      // In Armed mode, auto-heal in 3 seconds!
+      setTimeout(() => {
+        setServices((prev) =>
+          prev.map((s) =>
+            s.id === target.id
+              ? {
+                  ...s,
+                  status: 'nominal',
+                  health: 99.8,
+                  cfsQuota: 16,
+                  statusText: 'Auto-stabilized via sub-second memory drain · just now',
+                }
+              : s
+          )
+        );
+
+        const healTime = new Date().toISOString().substring(11, 19);
+        setLogs((prev) => [
+          ...prev,
+          {
+            id: `heal-${Date.now()}`,
+            timestamp: healTime,
+            probe: '[bpf_prog_sentinel]',
+            probeType: 'bpf',
+            serviceId: target.id,
+            message: `Autonomous in-kernel mitigation complete: Freed cgroup pressure in 340ms`,
+          },
+        ]);
+
+        addToast(
+          'success',
+          `Auto-Stabilized: ${target.name}`,
+          'Sentinel eBPF clamped burst and returned service to 99.8% health in 340ms.'
+        );
+      }, 3200);
+    }
+  };
+
+  // Handle Human Approval Gate Execution (Approve / Reject)
+  const handleUpdateIncidentStatus = (id: string, status: IncidentGate['status']) => {
+    const targetInc = incidents.find((i) => i.id === id);
+
+    setIncidents((prev) =>
+      prev.map((inc) => (inc.id === id ? { ...inc, status } : inc))
+    );
+
+    if (status === 'APPROVED' && targetInc) {
+      // Heal the corresponding microservice!
       setServices((prev) =>
         prev.map((s) =>
-          s.id === target.id
+          s.id === targetInc.serviceId
             ? {
                 ...s,
                 status: 'nominal',
                 health: 99.8,
                 cfsQuota: 16,
-                statusText: 'Auto-stabilized via sub-second memory drain · just now',
+                statusText: 'Human approval granted · eBPF mitigation applied successfully',
               }
             : s
         )
       );
 
-      const healTime = new Date().toISOString().substring(11, 19);
-      setLogs((prev) => [
-        ...prev,
+      setAuditLogs((prev) => [
         {
-          id: `heal-${Date.now()}`,
-          timestamp: healTime,
-          probe: '[bpf_prog_sentinel]',
-          probeType: 'bpf',
-          serviceId: target.id,
-          message: `Autonomous in-kernel mitigation complete: Freed cgroup pressure in 340ms`,
+          id: `AUD-${Math.floor(1000 + Math.random() * 9000)}`,
+          timestamp: `${new Date().toISOString().replace('T', ' ').substring(0, 19)} UTC`,
+          operator: 'sit24sc025@sairamtap.edu.in (Human Sign-off)',
+          action: `Gate Approved: ${targetInc.title}`,
+          targetService: targetInc.serviceName,
+          pid: targetInc.serviceId ? 18420 : 0,
+          result: 'SUCCESS',
+          signatureHash: Array.from({ length: 64 }, () =>
+            Math.floor(Math.random() * 16).toString(16)
+          ).join(''),
+          details: `Operator manually approved eBPF remediation for ${targetInc.id}. Pod stabilized without restart.`,
         },
+        ...prev,
       ]);
 
       addToast(
         'success',
-        `Auto-Stabilized: ${target.name}`,
-        'Sentinel eBPF clamped burst and returned service to 99.8% health in 340ms.'
+        '✅ Human Approval Executed',
+        `Remediation approved for ${targetInc.serviceName}! In-kernel cgroup clamp applied.`
       );
-    }, 3200);
+    } else if (status === 'REJECTED' && targetInc) {
+      addToast('info', 'Gate Rejected', `Incident ${id} rejected. No changes made to cluster.`);
+    }
   };
 
-  // Handle Incident status change
-  const handleUpdateIncidentStatus = (id: string, status: IncidentGate['status']) => {
-    setIncidents((prev) =>
-      prev.map((inc) => (inc.id === id ? { ...inc, status } : inc))
+  // Trigger test gated incident so user can try Human Approval anytime
+  const handleTriggerGatedIncident = () => {
+    const target = services[0];
+    const newGate: IncidentGate = {
+      id: `GATE-${Date.now().toString().slice(-4)}`,
+      serviceId: target.id,
+      serviceName: target.name,
+      title: `High Memory Pressure on ${target.name}`,
+      description: `Worker threads breached 80% RAM threshold. eBPF proposes freeing 42MB inactive cache.`,
+      severity: 'HIGH',
+      status: 'PENDING_GATE',
+      detectedAt: 'Just now',
+      rootCause: 'Sliding window baseline anomaly score: 0.72',
+      ebpfActionTaken: 'Sentinel eBPF throttler staged slab drain and socket pacing.',
+      ebpfProposedFix: `Free 42MB inactive heap cache and clamp CFS period to 100ms.`,
+    };
+
+    setIncidents((prev) => [newGate, ...prev]);
+    addToast(
+      'warning',
+      '🚨 Approval Gate Created!',
+      `You can approve it right now in the banner above or in the AI Chatbot.`
     );
-    addToast('info', 'Incident Gate Updated', `Incident ${id} marked as ${status}.`);
+  };
+
+  // Handle Connect Company Preset (Transfers the ENTIRE website to match that company's cloud!)
+  const handleConnectCompanyPreset = (preset: {
+    cluster: ClusterRegion;
+    services: Microservice[];
+    companyName: string;
+  }) => {
+    setCurrentCluster(preset.cluster);
+    setServices(preset.services);
+    setSelectedServiceId(preset.services[0].id);
+    setActiveCompanyName(preset.companyName);
+    setIsSandboxActive(true);
+    setHosting('customer-vpc');
+
+    addToast(
+      'success',
+      `Connected: ${preset.companyName}!`,
+      `Website updated to match ${preset.cluster.name} (${preset.cluster.location}). 14 company microservices live.`
+    );
   };
 
   // Number of healthy services
@@ -413,10 +554,17 @@ export default function App() {
       <Header
         mode={mode}
         onToggleMode={handleToggleMode}
-        onOpenTerminal={() => setIsTerminalOpen(true)}
-        onOpenClusterModal={() => setIsClusterModalOpen(true)}
+        onOpenTerminal={() => setIsAiChatOpen(true)}
+        onOpenClusterModal={() => setIsCloudConnectOpen(true)}
         onOpenProfileModal={() => setIsProfileModalOpen(true)}
         onOpenDeployModal={() => setIsDeployModalOpen(true)}
+        onOpenDemoTour={() => {
+          setDemoTourStep(1);
+          setIsDemoTourOpen(true);
+        }}
+        onOpenCloudConnect={() => setIsCloudConnectOpen(true)}
+        onOpenApprovalModal={() => setIsApprovalModalOpen(true)}
+        pendingApprovalsCount={pendingGates.length}
         hosting={hosting}
         currentCluster={currentCluster}
         healthyCount={healthyCount}
@@ -432,10 +580,88 @@ export default function App() {
         mobileOpen={mobileSidebarOpen}
         onCloseMobile={() => setMobileSidebarOpen(false)}
         onOpenDeployModal={() => setIsDeployModalOpen(true)}
+        pendingApprovalsCount={pendingGates.length}
       />
 
       {/* Main Content Area */}
       <div className="lg:pl-64 flex flex-col min-h-screen pt-16">
+        {/* PROMINENT HUMAN APPROVAL ALERT BAR (Answers "where will I give human approval") */}
+        {pendingGates.length > 0 && (
+          <div className="bg-[#C9A66B]/20 border-b-2 border-[#C9A66B] px-4 sm:px-6 py-3 flex flex-col md:flex-row md:items-center justify-between gap-3 text-[13px] animate-in slide-in-from-top duration-200 shadow-md">
+            <div className="flex items-center gap-2.5">
+              <span className="material-symbols-outlined text-[#C9A66B] text-[22px] animate-bounce">
+                warning
+              </span>
+              <div>
+                <span className="font-bold text-[#e1e2e8]">
+                  Human Approval Required ({pendingGates.length} pending):
+                </span>
+                <span className="text-[#C9A66B] ml-1.5 font-medium">
+                  {pendingGates[0].title} on <strong>{pendingGates[0].serviceName}</strong>
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => handleUpdateIncidentStatus(pendingGates[0].id, 'APPROVED')}
+                className="px-4 py-1.5 rounded-lg bg-[#aacfb6] hover:bg-[#c5ecd1] text-[#153725] font-bold text-[12px] shadow-sm transition-all hover:scale-105 flex items-center gap-1 cursor-pointer"
+              >
+                <span>✅ Click to Approve Fix</span>
+              </button>
+              <button
+                onClick={() => handleUpdateIncidentStatus(pendingGates[0].id, 'REJECTED')}
+                className="px-3 py-1.5 rounded-lg bg-[#272a2e] text-[#ffb4ab] hover:bg-[#ffb4ab]/20 text-[12px] font-medium transition-colors cursor-pointer"
+              >
+                <span>Reject</span>
+              </button>
+              <button
+                onClick={() => navigateTo('incidents')}
+                className="px-2.5 py-1.5 rounded-lg text-[#b0c9e4] hover:underline text-[12px] font-mono"
+              >
+                View Gates Tab →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Clear Sandbox Status Banner */}
+        <div className="bg-[#0b0e12] border-b border-[#272a2e] px-4 sm:px-6 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[12px]">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#aacfb6]/20 border border-[#aacfb6]/40 text-[#aacfb6] font-mono text-[11px] font-bold">
+              <span className="w-2 h-2 rounded-full bg-[#aacfb6] animate-pulse"></span>
+              SANDBOX SIMULATION ACTIVE
+            </span>
+            <span className="text-[#e1e2e8] font-semibold">
+              {activeCompanyName}
+            </span>
+            <span className="text-[#8d9197]">({currentCluster.location})</span>
+            <span className="text-[#8d9197] hidden md:inline">·</span>
+            <span className="text-[#b0c9e4] font-mono hidden md:inline">
+              {currentCluster.activeNodes} Nodes Attached · eBPF Sentinel v4.18
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => setIsCloudConnectOpen(true)}
+              className="px-2.5 py-1 rounded bg-[#1d2024] hover:bg-[#272a2e] text-[#b0c9e4] border border-[#272a2e] text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1"
+            >
+              <span className="material-symbols-outlined text-[14px]">swap_horiz</span>
+              <span>Switch Company Cloud</span>
+            </button>
+            <button
+              onClick={() => {
+                setDemoTourStep(1);
+                setIsDemoTourOpen(true);
+              }}
+              className="px-2.5 py-1 rounded bg-[#aacfb6]/15 hover:bg-[#aacfb6] text-[#aacfb6] hover:text-[#153725] border border-[#aacfb6]/40 font-semibold text-[11px] transition-colors flex items-center gap-1 cursor-pointer"
+            >
+              <span>▶ 1-Min Guided Demo</span>
+            </button>
+          </div>
+        </div>
+
         {/* Mode Notification Banners */}
         {mode === 'dry-run' && (
           <div className="bg-[#d4a373]/15 border-b border-[#d4a373]/30 px-6 py-2 flex items-center justify-between text-[12px] text-[#d4a373]">
@@ -454,19 +680,19 @@ export default function App() {
           </div>
         )}
 
-        {mode === 'gated' && (
+        {mode === 'gated' && pendingGates.length === 0 && (
           <div className="bg-[#C9A66B]/15 border-b border-[#C9A66B]/30 px-6 py-2 flex items-center justify-between text-[12px] text-[#C9A66B]">
             <div className="flex items-center gap-2">
               <span className="material-symbols-outlined text-[16px]">verified_user</span>
               <span>
-                <strong>Human-Approval (Gated) Mode Active:</strong> In-kernel remediations require ticket sign-off in the Incidents & Gates tab.
+                <strong>Human-Approval (Gated) Mode Active:</strong> Any detected anomalies will pause and require your approval before eBPF takes action.
               </span>
             </div>
             <button
-              onClick={() => navigateTo('incidents')}
+              onClick={handleTriggerGatedIncident}
               className="text-[#e1e2e8] font-mono underline hover:text-white"
             >
-              View Pending Gates →
+              Test Approval Gate Now →
             </button>
           </div>
         )}
@@ -501,16 +727,6 @@ export default function App() {
             />
           )}
 
-          {currentRoute === 'architecture' && (
-            <ArchitectureView
-              mode={mode}
-              onSelectMode={handleToggleMode}
-              hosting={hosting}
-              onSelectHosting={setHosting}
-              onOpenDeployModal={() => setIsDeployModalOpen(true)}
-            />
-          )}
-
           {currentRoute === 'control-room' && (
             <ControlRoomView
               services={services}
@@ -532,6 +748,7 @@ export default function App() {
                 setSelectedServiceId(serviceId);
                 navigateTo('fleet');
               }}
+              onTriggerGatedIncident={handleTriggerGatedIncident}
             />
           )}
 
@@ -563,7 +780,63 @@ export default function App() {
         </main>
       </div>
 
-      {/* Modals & Dialogs */}
+      {/* AI Chatbot Assistant Widget controlling the whole Sentinel node */}
+      <AiChatbot
+        isOpen={isAiChatOpen}
+        onToggle={() => setIsAiChatOpen(!isAiChatOpen)}
+        services={services}
+        currentCluster={currentCluster}
+        activeMode={mode}
+        pendingGates={pendingGates}
+        onApproveGate={(id) => handleUpdateIncidentStatus(id || pendingGates[0]?.id, 'APPROVED')}
+        onRejectGate={(id) => handleUpdateIncidentStatus(id || pendingGates[0]?.id, 'REJECTED')}
+        onTriggerProbe={handleTriggerProbe}
+        onSimulateSpike={(serviceId) => handleSimulateAnomaly(serviceId || services[0].id)}
+        onSwitchMode={handleToggleMode}
+        onSwitchCompanyCloud={(presetId) => {
+          const p = COMPANY_PRESETS.find((c) => c.id === presetId);
+          if (p) handleConnectCompanyPreset(p);
+        }}
+        onOpenCloudConnect={() => setIsCloudConnectOpen(true)}
+        onNavigate={navigateTo}
+        onOpenApprovalModal={() => setIsApprovalModalOpen(true)}
+      />
+
+      {/* Human-in-the-Loop Approval Console Modal */}
+      <HumanApprovalModal
+        isOpen={isApprovalModalOpen}
+        onClose={() => setIsApprovalModalOpen(false)}
+        pendingGates={pendingGates}
+        activeMode={mode}
+        onApproveGate={(id) => handleUpdateIncidentStatus(id, 'APPROVED')}
+        onRejectGate={(id) => handleUpdateIncidentStatus(id, 'REJECTED')}
+        onSwitchMode={handleToggleMode}
+        onTriggerTestIncident={handleTriggerGatedIncident}
+        onNavigateToFleet={(serviceId) => {
+          setSelectedServiceId(serviceId);
+          navigateTo('fleet');
+        }}
+      />
+
+      {/* Guided Interactive Demo Tour Modal */}
+      <InteractiveDemoTour
+        isOpen={isDemoTourOpen}
+        onClose={() => setIsDemoTourOpen(false)}
+        step={demoTourStep}
+        onNextStep={() => setDemoTourStep((prev) => Math.min(5, prev + 1))}
+        onPrevStep={() => setDemoTourStep((prev) => Math.max(1, prev - 1))}
+        onTriggerTestAnomaly={() => handleSimulateAnomaly(selectedService.id)}
+        onOpenCloudConnect={() => setIsCloudConnectOpen(true)}
+      />
+
+      {/* Connect Company Cloud Modal (with full Presets) */}
+      <CloudConnectModal
+        isOpen={isCloudConnectOpen}
+        onClose={() => setIsCloudConnectOpen(false)}
+        onConnectCompanyPreset={handleConnectCompanyPreset}
+      />
+
+      {/* DaemonSet Installation Modal */}
       <InstallDaemonSetModal
         isOpen={isDeployModalOpen}
         onClose={() => setIsDeployModalOpen(false)}
@@ -571,9 +844,10 @@ export default function App() {
         onSelectMode={handleToggleMode}
         hosting={hosting}
         onSelectHosting={setHosting}
-        activeNodesCount={42}
+        activeNodesCount={currentCluster.activeNodes}
       />
 
+      {/* Ask Sentinel CLI Terminal */}
       <AskSentinelModal
         isOpen={isTerminalOpen}
         onClose={() => setIsTerminalOpen(false)}
