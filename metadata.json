@@ -1,0 +1,6 @@
+{
+  "name": "ScyldAI Sentinel Control",
+  "description": "Autonomous kernel-level AI self-healing agent for containerized microservices. Real-time eBPF anomaly detection, sub-second micro-recovery, and zero-cascade infrastructure resilience.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
